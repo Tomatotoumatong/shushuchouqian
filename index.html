@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F2EFE8">
+<title>抽签</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect x=%2713%27 y=%273%27 width=%276%27 height=%2722%27 rx=%271.5%27 fill=%27%23E8B54D%27 transform=%27rotate(-14 16 16)%27/%3E%3Ccircle cx=%2724%27 cy=%2726%27 r=%273.2%27 fill=%27%23E2502C%27/%3E%3C/svg%3E">
+<meta name="description" content="写下选项，晃一晃薯条盒，掉出来的那根就是答案。">
+<style>
+  :root{
+    --bg:#F2EFE8; --surface:#FAF8F3; --ink:#171614; --ink-2:#55514A; --muted:#9A958A; --line:#E2DDD2;
+    --accent:#E2502C; --ok:#1F9D6B;
+    --sans:-apple-system,BlinkMacSystemFont,"PingFang SC","HarmonyOS Sans SC","MiSans","Hiragino Sans GB","Noto Sans SC","Microsoft YaHei",sans-serif;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#121211; --surface:#1B1A19; --ink:#F1EEE7; --ink-2:#C2BDB3; --muted:#75716A; --line:#2A2926; --accent:#FF6440; }
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg)}
+  body{font-family:var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent;min-height:100vh}
+  button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+  button:disabled{cursor:not-allowed}
+  input{font:inherit;color:inherit}
+  .app{max-width:440px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+
+  /* header + mode switch */
+  .top{display:flex;align-items:center;justify-content:space-between;padding:20px 24px 0}
+  .brand{font-size:17px;font-weight:600;letter-spacing:.02em;display:flex;align-items:center;gap:8px}
+  .brand i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block}
+  .meta{font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.04em}
+
+  /* stage: the photo, decomposed into layers */
+  .stage{position:relative;margin:14px 16px 0;height:400px;border-radius:20px;overflow:hidden;background:#2a2b28;isolation:isolate}
+  .scene{position:absolute;left:0;top:0;width:1024px;height:572px;transform-origin:0 0}
+  .scene img{position:absolute;display:block;user-select:none;-webkit-user-drag:none;pointer-events:none}
+  .l-bg{left:0;top:0;width:1024px;height:572px;z-index:0}
+  .l-pile{z-index:1;will-change:transform}
+  .l-front{z-index:3;will-change:transform}
+  .flywrap{position:absolute;left:0;top:0;width:1024px;height:572px;z-index:2;pointer-events:none;
+    perspective:1100px;perspective-origin:530px 330px}
+  .longfry{position:absolute;left:0;top:0;opacity:0;will-change:transform,opacity;filter:drop-shadow(1px 2px 1.5px rgba(50,24,0,.32))}
+  .scene img.landfry{z-index:6;opacity:0;will-change:transform,opacity;filter:drop-shadow(1px 1.5px 1px rgba(0,0,0,.35))}
+  .fshadow{position:absolute;left:0;top:0;z-index:1;height:12px;border-radius:50%;opacity:0;transform-origin:50% 50%;
+    background:radial-gradient(closest-side,rgba(12,8,3,.75),rgba(12,8,3,0))}
+  .crumbs{position:absolute;left:0;top:0;width:1024px;height:572px;z-index:6;pointer-events:none}
+  .crumbs i{position:absolute;left:0;top:0;border-radius:45%;box-shadow:.4px .8px .6px rgba(0,0,0,.35)}
+  .hint{text-align:center;font-size:12px;color:var(--muted);letter-spacing:.04em;padding:12px 0 16px}
+
+  /* shared list styles */
+  .panel{padding:0 20px 24px;transition:opacity .25s}
+  body.is-drawing .panel{opacity:.5;pointer-events:none}
+  .head{display:flex;align-items:baseline;justify-content:space-between;padding:0 4px 12px}
+  .head h2{font-size:13px;font-weight:600;color:var(--ink-2);letter-spacing:.06em}
+  .text-btn{font-size:13px;color:var(--muted);padding:4px 2px}
+  .text-btn:hover{color:var(--ink)}
+  .presets{display:flex;gap:8px;overflow-x:auto;padding:0 4px 14px;scrollbar-width:none}
+  .presets::-webkit-scrollbar{display:none}
+  .chip{flex:none;font-size:13px;padding:7px 13px;border-radius:999px;border:1px solid var(--line);color:var(--ink-2)}
+  .chip:hover{border-color:var(--ink-2);color:var(--ink)}
+  .list{list-style:none;background:var(--surface);border-radius:16px;border:1px solid var(--line);overflow:hidden}
+  .row{display:flex;align-items:center;gap:12px;padding:0 8px 0 16px;min-height:54px;border-top:1px solid var(--line)}
+  .row:first-child{border-top:0}
+  .idx{font-family:var(--mono);font-size:11px;color:var(--muted);width:18px;flex:none}
+  .row input{flex:1;min-width:0;height:52px;border:0;outline:0;background:transparent;font-size:16px}
+  .row input::placeholder{color:var(--muted);opacity:.7}
+  .row:focus-within .idx{color:var(--accent)}
+  .del{width:34px;height:34px;flex:none;border-radius:50%;display:grid;place-items:center;color:var(--muted)}
+  .del:hover:not(:disabled){background:var(--bg);color:var(--ink)}
+  .del:disabled{opacity:.25}
+  .del svg{width:12px;height:12px}
+  .add{width:100%;height:50px;margin-top:10px;border-radius:14px;border:1px dashed var(--line);color:var(--ink-2);font-size:14px}
+  .add:hover:not(:disabled){border-color:var(--ink-2);color:var(--ink)}
+  .add:disabled{opacity:.4}
+  .limit{font-size:12px;color:var(--muted);text-align:center;margin-top:10px;min-height:16px}
+
+  /* draw bar */
+  .draw-bar{position:sticky;bottom:0;z-index:5;margin-top:auto;padding:18px 20px calc(16px + env(safe-area-inset-bottom));background:linear-gradient(to top,var(--bg) 62%,transparent)}
+  .draw{width:100%;height:56px;border-radius:999px;background:var(--ink);color:var(--bg);font-size:17px;font-weight:600;letter-spacing:.04em;transition:transform .15s,opacity .2s}
+  .draw:active:not(:disabled){transform:scale(.98)}
+  .draw:disabled{opacity:.35}
+
+  /* sheets & modal */
+  .backdrop{position:fixed;inset:0;z-index:20;background:rgba(18,17,15,.4);opacity:0;pointer-events:none;transition:opacity .3s;display:flex;align-items:flex-end;justify-content:center}
+  .backdrop.open{opacity:1;pointer-events:auto}
+  .sheet{width:100%;max-width:440px;max-height:92vh;overflow:auto;background:var(--surface);border-radius:24px 24px 0 0;padding:12px 24px calc(22px + env(safe-area-inset-bottom));transform:translateY(100%);transition:transform .42s cubic-bezier(.2,.85,.25,1)}
+  .backdrop.open .sheet{transform:translateY(0)}
+  .grabber{width:36px;height:4px;border-radius:2px;background:var(--line);margin:0 auto 24px}
+  .sheet-meta{display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px;color:var(--muted);letter-spacing:.06em}
+  .sheet-meta b{color:var(--accent);font-weight:600}
+  .result{font-weight:700;line-height:1.15;padding:26px 0 6px;word-break:break-word;font-size:60px}
+  .result.md{font-size:42px}.result.sm{font-size:30px}
+  .result-by{min-height:0;margin-bottom:34px}
+  .sheet-actions{display:grid;grid-template-columns:1fr 1.4fr;gap:10px}
+  .btn{height:52px;border-radius:999px;font-size:16px;font-weight:600}
+  .btn.ghost{border:1px solid var(--line);color:var(--ink)}
+  .btn.solid{background:var(--ink);color:var(--surface)}
+
+  @media (prefers-reduced-motion: reduce){ .sheet{transition-duration:.01s} }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <div class="brand"><i></i>抽签</div>
+    <div class="meta" id="meta"></div>
+  </header>
+
+  <section class="stage" id="stage" aria-hidden="true">
+    <div class="scene" id="scene">
+      <img class="l-bg" id="lBg" alt="">
+      <img class="l-pile" id="lPile" alt="">
+      <div class="fshadow" id="fShadow"></div>
+      <div class="flywrap" id="flyWrap"><img class="longfry" id="longFry" alt=""></div>
+      <img class="l-front" id="lFront" alt="">
+      <img class="landfry" id="landFry" alt="">
+      <div class="crumbs" id="crumbs"></div>
+    </div>
+  </section>
+  <p class="hint" id="hint"></p>
+
+  <section class="panel" id="soloPanel">
+    <div class="head"><h2>签的内容</h2><button class="text-btn" id="clearBtn">清空</button></div>
+    <div class="presets" id="presets"></div>
+    <ol class="list" id="list"></ol>
+    <button class="add" id="addBtn">+ 添加一项</button>
+    <p class="limit" id="limit"></p>
+  </section>
+
+  <div class="draw-bar"><button class="draw" id="drawBtn">晃一晃</button></div>
+</main>
+
+<div class="backdrop" id="resultBackdrop">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="resultText">
+    <div class="grabber"></div>
+    <div class="sheet-meta"><span id="resultNo"></span><span id="resultOf"></span></div>
+    <div class="result" id="resultText" aria-live="polite"></div>
+    <div class="result-by" id="resultBy"></div>
+    <div class="sheet-actions" id="resultActions"></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  /* ================= assets (layers decomposed from the reference photo) ================= */
+  const A = Object.fromEntries(['bg', 'pile', 'front', 'fryA', 'fryC', 'fryB1', 'fryB2', 'longR3', 'longL1', 'longR1', 'longB1', 'longB2']
+    .map(k => [k, `assets/${k}.webp`]));
+  const M = {"W":1024,"H":572,"pile":{"x":397,"y":145,"w":288,"h":152},"front":{"x":406,"y":227,"w":254,"h":227},"sprites":{"A":{"x":322,"y":393,"w":49,"h":91},"C":{"x":363,"y":418,"w":116,"h":72},"B1":{"w":79.25,"h":90.5,"axis":-36.8,"len":87.7,"shadowAng":53.2,"cx":-1.24,"cy":3.8},"B2":{"w":134.5,"h":84.75,"axis":60.9,"len":128.2,"shadowAng":150.9,"cx":0.16,"cy":3.33}},"rim":[[410,229.4],[418,234.7],[426,240.4],[434,246.3],[442,252.4],[450,258.4],[458,264.3],[466,269.8],[474,274.9],[482,279.4],[490,283.4],[498,286.6],[506,289.1],[514,290.7],[522,291.6],[530,291.8],[538,291.4],[546,290.1],[554,288.1],[562,285.3],[570,281.8],[578,277.9],[586,273.7],[594,269.3],[602,264.8],[610,260.0],[618,254.9],[626,249.7],[634,244.6],[642,240.0],[650,236.0]],"long":{"R3":{"w":27.0,"h":180.0},"L1":{"w":24.0,"h":172.0},"R1":{"w":28.0,"h":184.0},"B1":{"w":26.0,"h":170.0},"B2":{"w":25.0,"h":182.0}}};
+  // table-perspective fries (cut from the fries lying on the table): used for the landing
+  //   axis: screen angle of the fry's long axis (CSS rotate of an upright stick), len: on-screen length
+  //   sx/sy: centre of the fry's contact line relative to the sprite centre (for the shadow)
+  const SPR = {
+    A:  { ...M.sprites.A,  src: A.fryA,  axis: -13.9, len: 87.6,  shadowAng: 76, sx: 2, sy: 4 },        // front row, from the photo
+    C:  { ...M.sprites.C,  src: A.fryC,  axis: -70,   len: 113.9, shadowAng: 20, sx: 2, sy: 4 },
+    B1: { ...M.sprites.B1, src: A.fryB1, sx: M.sprites.B1.cx + 2, sy: M.sprites.B1.cy + 3 },            // back row, re-projected
+    B2: { ...M.sprites.B2, src: A.fryB2, sx: M.sprites.B2.cx + 2, sy: M.sprites.B2.cy + 3 },
+  };
+  // full-length upright fries (heads straightened out of the pile + their own texture extended): used for extraction & flight
+  const LONG = Object.fromEntries(['R3', 'L1', 'R1', 'B1', 'B2'].map(k => [k, { ...M.long[k], src: A['long' + k] }]));
+  const FRONT_LONG = ['R3', 'L1', 'R1'];
+  const SPOTS = [[520, 508], [592, 516], [462, 524], [640, 512]];  // landing spots on the table
+  const PIVOT = [531, 452];                                        // carton bottom centre
+  const FOCUS_X = 540;
+
+  /* ================= storage helpers ================= */
+  const ls = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  };
+  /* ================= utils ================= */
+  const $ = id => document.getElementById(id);
+  const pad = n => String(n).padStart(2, '0');
+  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function randInt(n) {
+    const c = window.crypto;
+    if (!c || !c.getRandomValues) return Math.floor(Math.random() * n);
+    const lim = Math.floor(0x100000000 / n) * n, a = new Uint32Array(1);
+    do { c.getRandomValues(a); } while (a[0] >= lim);
+    return a[0] % n;
+  }
+  function seeded(seed) {
+    return () => {
+      seed = (seed + 0x6D2B79F5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  /* ================= scene ================= */
+  const stage = $('stage'), scene = $('scene');
+  const lPile = $('lPile'), lFront = $('lFront'), fShadow = $('fShadow');
+  const flyWrap = $('flyWrap'), longFry = $('longFry'), landFry = $('landFry'), crumbs = $('crumbs');
+  flyWrap.style.transformOrigin = `${PIVOT[0]}px ${PIVOT[1]}px`;
+  $('lBg').src = A.bg;
+  function placeLayer(el, src, box) {
+    el.src = src;
+    Object.assign(el.style, { left: box.x + 'px', top: box.y + 'px', width: box.w + 'px', height: box.h + 'px',
+      transformOrigin: `${PIVOT[0] - box.x}px ${PIVOT[1] - box.y}px` });
+  }
+  placeLayer(lPile, A.pile, M.pile);
+  placeLayer(lFront, A.front, M.front);
+
+  function fit() {
+    const r = stage.getBoundingClientRect();
+    const s = Math.max(r.height / M.H, r.width / M.W);
+    let ox = r.width / 2 - FOCUS_X * s;
+    ox = Math.min(0, Math.max(r.width - M.W * s, ox));
+    const oy = (r.height - M.H * s) / 2;
+    scene.style.transform = `translate(${ox}px,${oy}px) scale(${s})`;
+  }
+  window.addEventListener('resize', fit);
+
+  function rimY(x) {
+    const R = M.rim;
+    if (x <= R[0][0]) return R[0][1];
+    for (let i = 1; i < R.length; i++) if (x <= R[i][0]) {
+      const t = (x - R[i - 1][0]) / (R[i][0] - R[i - 1][0]);
+      return R[i - 1][1] + t * (R[i][1] - R[i - 1][1]);
+    }
+    return R[R.length - 1][1];
+  }
+
+  // 4 landing fries x mirror = 8 landing poses. Back-row fries (B1/B2) land as themselves;
+  // front-row landings (A/C) are fed by one of the three front-row long fries.
+  function makePlan(rng) {
+    const key = ['A', 'C', 'B1', 'B2'][Math.floor(rng() * 4)];
+    const longKey = (key === 'B1' || key === 'B2') ? key : FRONT_LONG[Math.floor(rng() * 3)];
+    const f = rng() < 0.5 ? 1 : -1;
+    const spots = SPR[key].w > 100 ? SPOTS.filter(p => p[0] > 500 && p[0] < 620) : SPOTS;   // wide fries stay clear of the ketchup cup
+    const spot = spots[Math.floor(rng() * spots.length)];
+    const lx = 480 + rng() * 120;
+    return {
+      longKey, key, lx, f,
+      tilt: (lx - 530) * 0.14 + (rng() - 0.5) * 8,          // fries fan outward in the carton
+      tx: spot[0] + (rng() - 0.5) * 16, ty: spot[1] + (rng() - 0.5) * 8,
+      delta: (rng() - 0.5) * 14,                               // stays close to the table's perspective
+      crumbSeed: Math.floor(rng() * 1e9),
+    };
+  }
+
+  let landed = null;   // {key,x,y,r,f}
+  const allAnims = () => [longFry, landFry, fShadow, flyWrap, lPile, lFront, ...crumbs.children].flatMap(el => el.getAnimations());
+
+  function clearFry(instant) {
+    if (!landed && !crumbs.children.length) return;
+    landed = null;
+    const els = [landFry, fShadow, ...crumbs.children];
+    if (instant) { allAnims().forEach(a => a.cancel()); crumbs.innerHTML = ''; return; }
+    els.forEach(el => el.animate([{ opacity: getComputedStyle(el).opacity }, { opacity: 0 }], { duration: 260, fill: 'forwards' }));
+    setTimeout(() => { if (!landed) { allAnims().forEach(a => a.cancel()); crumbs.innerHTML = ''; } }, 300);
+  }
+
+  // 1 wiggle  ->  2 extraction along the fry's own axis (ease-in)  ->  3 3D tip-over & fall  ->  4 swap to table fry, settle
+  function playDrop(plan, onLanded) {
+    allAnims().forEach(a => a.cancel()); crumbs.innerHTML = '';
+    const lf = LONG[plan.longKey], L = lf.h, w = lf.w, land = SPR[plan.key];
+    longFry.src = lf.src; Object.assign(longFry.style, { width: w + 'px', height: L + 'px' });
+    landFry.src = land.src; Object.assign(landFry.style, { width: land.w + 'px', height: land.h + 'px' });
+
+    const rad = plan.tilt * Math.PI / 180, ux = Math.sin(rad), uy = -Math.cos(rad);
+    const rim = [plan.lx, rimY(plan.lx)];
+    const top0 = [rim[0] + ux * 0.24 * L, rim[1] + uy * 0.24 * L];           // ~24% of the fry shows above the rim
+    const c0 = [top0[0] - ux * L / 2, top0[1] - uy * L / 2];
+    const D = 0.76 * L + 12 / Math.cos(rad);                                  // pull until the root clears the rim
+    const c1 = [c0[0] + ux * D, c0[1] + uy * D];
+    const bottomOut = [c1[0] - ux * L / 2, c1[1] - uy * L / 2];
+    const f = plan.f || 1;
+    const rzT = f * land.axis + plan.delta;          // mirrored sprite -> mirrored axis
+    const S1 = 1.12;
+    const rxT = Math.acos(Math.min(0.85, Math.max(0.2, land.len / (L * S1)))) * 180 / Math.PI;
+    const dir = plan.tx >= c1[0] ? 1 : -1;
+    const LT = (c, rz, rx, sc) => `translate(${(c[0] - w / 2).toFixed(1)}px,${(c[1] - L / 2).toFixed(1)}px) rotateZ(${rz.toFixed(1)}deg) rotateX(${rx.toFixed(1)}deg) scale(${sc})`;
+    const PT = (x, y, r) => `translate(${(x - land.w / 2).toFixed(1)}px,${(y - land.h / 2).toFixed(1)}px) rotate(${r.toFixed(1)}deg) scaleX(${f})`;
+    const sw = land.len * 0.95, shAng = (f > 0 ? land.shadowAng : 180 - land.shadowAng) + plan.delta;
+    // contact-line offset, mirrored and rotated with the sprite
+    const dr = plan.delta * Math.PI / 180, ox = f * land.sx, oy = land.sy;
+    const shx = plan.tx + ox * Math.cos(dr) - oy * Math.sin(dr), shy = plan.ty + ox * Math.sin(dr) + oy * Math.cos(dr);
+    const SH = (sc) => `translate(${(shx - sw / 2).toFixed(1)}px,${(shy - 6).toFixed(1)}px) rotate(${shAng.toFixed(1)}deg) scale(${sc})`;
+    fShadow.style.width = sw + 'px';
+
+    const finish = () => {
+      landed = { key: plan.key, x: plan.tx, y: plan.ty, r: plan.delta, f };
+      if (navigator.vibrate) { try { navigator.vibrate(14); } catch (e) {} }
+      onLanded && onLanded();
+    };
+
+    if (reduceMotion) {
+      landFry.style.transform = PT(plan.tx, plan.ty, plan.delta);
+      landFry.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 200, fill: 'forwards' });
+      fShadow.animate([{ opacity: 0, transform: SH(1) }, { opacity: .8, transform: SH(1) }], { duration: 200, fill: 'forwards' });
+      setTimeout(finish, 220); return;
+    }
+
+    // timeline (ms)
+    const T_WIG = 480, T_CLEAR = 910, T_APEX = 1090, T_TOUCH = 1460, T_SWAP = 1415, T_END = 1760;
+
+    // 1 — the carton (and the fry sitting in it) wiggles
+    const wig = [
+      { transform: 'rotate(0deg)' }, { transform: 'rotate(-2deg) translateY(-2px)' }, { transform: 'rotate(1.8deg)' },
+      { transform: 'rotate(-1.5deg) translateY(-1px)' }, { transform: 'rotate(1deg)' }, { transform: 'rotate(0deg)' },
+    ];
+    [lPile, lFront, flyWrap].forEach(el => el.animate(wig, { duration: T_WIG, easing: 'ease-in-out' }));
+    // neighbours get nudged while one fry is dragged out
+    lPile.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(-1.2px)' }, { transform: 'translateY(.6px)' }, { transform: 'translateY(-.5px)' }, { transform: 'translateY(0)' }],
+      { delay: T_WIG, duration: T_CLEAR - T_WIG, easing: 'ease-in-out' });
+    // the rim lip gets flicked as the root slips over it
+    lFront.animate([{ transform: 'translateY(0) skewX(0deg)' }, { transform: 'translateY(-1.6px) skewX(-.5deg)' }, { transform: 'translateY(.4px) skewX(.15deg)' }, { transform: 'translateY(0) skewX(0deg)' }],
+      { delay: T_CLEAR - 40, duration: 220, easing: 'ease-out' });
+    // the flying fry sits between pile and carton front until its root has cleared the rim
+    flyWrap.animate([{ zIndex: 2, offset: 0 }, { zIndex: 2, offset: (T_CLEAR - 5) / T_END }, { zIndex: 5, offset: T_CLEAR / T_END }, { zIndex: 5, offset: 1 }],
+      { duration: T_END, fill: 'forwards' });
+
+    // 2 + 3 — extraction along its axis, then tip over in 3D and fall toward the camera
+    const apex = [c1[0] + (plan.tx - c1[0]) * 0.28 + ux * 10, c1[1] - 30];
+    const nearLand = [apex[0] + (plan.tx - apex[0]) * 0.9, apex[1] + (plan.ty - apex[1]) * 0.9];
+    const o = t => t / T_TOUCH;
+    longFry.animate([
+      { offset: 0,            transform: LT(c0, plan.tilt, 0, 1) },
+      { offset: o(T_WIG),     transform: LT(c0, plan.tilt, 0, 1), easing: 'cubic-bezier(.55,0,.9,.45)' },
+      { offset: o(T_CLEAR),   transform: LT(c1, plan.tilt, 0, 1), easing: 'cubic-bezier(.2,.6,.45,1)' },
+      { offset: o(T_APEX),    transform: LT(apex, plan.tilt + (rzT - plan.tilt) * 0.3, rxT * 0.2, 1.03), easing: 'cubic-bezier(.45,0,.9,.6)' },
+      { offset: o(T_SWAP),    transform: LT(nearLand, rzT - dir * 4, rxT * 0.92, 1.1) },
+      { offset: 1,            transform: LT([plan.tx, plan.ty], rzT, rxT, S1) },
+    ], { duration: T_TOUCH, fill: 'forwards' });
+    longFry.animate([
+      { offset: 0, opacity: 0 }, { offset: 130 / T_TOUCH, opacity: 1 }, { offset: T_SWAP / T_TOUCH, opacity: 1 }, { offset: 1, opacity: 0 },
+    ], { duration: T_TOUCH, fill: 'forwards' });
+
+    // 4 — swap to the table-perspective fry right before touch-down, small bounce + slide
+    const slide = 7 * dir;
+    const e = t => t / T_END;
+    const land0 = [plan.tx - slide, plan.ty];
+    landFry.animate([
+      { offset: 0,             opacity: 0, transform: PT(land0[0], land0[1], plan.delta) },
+      { offset: e(T_SWAP),     opacity: 0, transform: PT(nearLand[0], nearLand[1], plan.delta - dir * 4) },
+      { offset: e(T_TOUCH),    opacity: 1, transform: PT(land0[0], land0[1], plan.delta), easing: 'cubic-bezier(.2,.7,.4,1)' },
+      { offset: e(T_TOUCH + 75),  opacity: 1, transform: PT(land0[0] + slide * .45, land0[1] - 4.5, plan.delta - dir * 1.5), easing: 'cubic-bezier(.5,0,.9,.6)' },
+      { offset: e(T_TOUCH + 150), opacity: 1, transform: PT(land0[0] + slide * .75, land0[1], plan.delta), easing: 'cubic-bezier(.2,.7,.3,1)' },
+      { offset: 1,             opacity: 1, transform: PT(plan.tx, plan.ty, plan.delta) },
+    ], { duration: T_END, fill: 'forwards' });
+
+    // shadow: wide/soft/faint while the fry is high, tightens into a contact shadow on touch-down
+    fShadow.animate([
+      { offset: 0,             opacity: 0,   transform: SH(1.8), filter: 'blur(9px)' },
+      { offset: e(T_CLEAR),    opacity: 0,   transform: SH(1.8), filter: 'blur(9px)' },
+      { offset: e(T_APEX),     opacity: .2,  transform: SH(1.55), filter: 'blur(7px)' },
+      { offset: e(T_TOUCH),    opacity: .78, transform: SH(1.02), filter: 'blur(1.6px)' },
+      { offset: e(T_TOUCH + 75), opacity: .6, transform: SH(1.08), filter: 'blur(2.2px)' },
+      { offset: 1,             opacity: .82, transform: SH(1), filter: 'blur(1.4px)' },
+    ], { duration: T_END, fill: 'forwards' });
+
+    // salt grains / golden crumbs flicked off the rim
+    const cr = seeded(plan.crumbSeed);
+    const nC = 3 + Math.floor(cr() * 2);
+    const rx0 = bottomOut[0], ry0 = rimY(bottomOut[0]) - 2;
+    for (let i = 0; i < nC; i++) {
+      const el = document.createElement('i');
+      const salt = cr() < 0.6, sz = salt ? 1.8 + cr() * 1.2 : 2.4 + cr() * 1.6;
+      Object.assign(el.style, { width: sz + 'px', height: (sz * (0.8 + cr() * 0.3)) + 'px', background: salt ? '#F6F1E6' : '#D9A145', opacity: 0 });
+      crumbs.appendChild(el);
+      const ex = rx0 + (cr() - 0.5) * 70, ey = 456 + cr() * 30;
+      const mx = (rx0 + ex) / 2 + (cr() - 0.5) * 10, my = ry0 - 10 - cr() * 16;
+      const d = 520 + cr() * 220;
+      el.animate([
+        { offset: 0,   opacity: 1, transform: `translate(${rx0}px,${ry0}px)`, easing: 'cubic-bezier(.2,.6,.4,1)' },
+        { offset: .3,  opacity: 1, transform: `translate(${mx}px,${my}px)`, easing: 'cubic-bezier(.5,0,1,.6)' },
+        { offset: .88, opacity: 1, transform: `translate(${ex}px,${ey}px)` },
+        { offset: .94, opacity: 1, transform: `translate(${ex + (ex - rx0) * .03}px,${ey - 1.5}px)` },
+        { offset: 1,   opacity: 1, transform: `translate(${ex + (ex - rx0) * .04}px,${ey}px)` },
+      ], { delay: T_CLEAR - 60 + i * 25, duration: d, fill: 'forwards' });
+    }
+
+    setTimeout(finish, T_END + 20);
+  }
+
+  /* ================= result sheet ================= */
+  const resultBackdrop = $('resultBackdrop');
+  function openResult({ no, of, text, by, actions }) {
+    $('resultNo').innerHTML = no; $('resultOf').textContent = of;
+    $('resultText').textContent = text;
+    $('resultText').className = 'result' + (text.length > 8 ? ' sm' : text.length > 4 ? ' md' : '');
+    $('resultBy').textContent = by || '';
+    const box = $('resultActions'); box.innerHTML = '';
+    actions.forEach(a => { const b = document.createElement('button'); b.className = 'btn ' + a.cls; b.textContent = a.label; b.onclick = a.onClick; box.appendChild(b); });
+    resultBackdrop.classList.add('open');
+  }
+  function closeResult(cb) { resultBackdrop.classList.remove('open'); setTimeout(() => cb && cb(), 320); }
+  resultBackdrop.addEventListener('click', e => { if (e.target === resultBackdrop) closeResult(() => { endDraw(); clearFry(); }); });
+
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && resultBackdrop.classList.contains('open')) closeResult(() => { endDraw(); clearFry(); }); });
+
+  let drawing = false;
+  function beginDraw() { drawing = true; document.body.classList.add('is-drawing'); refreshButton(); }
+  function endDraw() { drawing = false; document.body.classList.remove('is-drawing'); refreshButton(); }
+
+  /* ================= options + draw ================= */
+  const MIN = 2, MAX = 30, KEY = 'chouqian.items.v2';
+  const PRESETS = [
+    { name: '今天吃什么', items: ['火锅', '日料', '牛肉面', '烧烤', '轻食沙拉'] },
+    { name: '是 / 否', items: ['是', '否'] },
+    { name: '掷骰子', items: ['1', '2', '3', '4', '5', '6'] },
+    { name: '石头剪刀布', items: ['石头', '剪刀', '布'] },
+  ];
+  let items = (() => { const v = ls.get(KEY, null); return Array.isArray(v) && v.length >= MIN && v.length <= MAX && v.every(x => typeof x === 'string') ? v : PRESETS[0].items.slice(); })();
+  const saveItems = () => ls.set(KEY, items);
+  const labelOf = i => (items[i] || '').trim() || `选项 ${i + 1}`;
+  const listEl = $('list');
+
+  function renderList(focusIndex) {
+    listEl.innerHTML = '';
+    items.forEach((val, i) => {
+      const li = document.createElement('li');
+      li.className = 'row';
+      li.innerHTML = `<span class="idx">${pad(i + 1)}</span>
+        <input type="text" maxlength="24" enterkeyhint="next" placeholder="选项 ${i + 1}" aria-label="第 ${i + 1} 项">
+        <button class="del" aria-label="删除第 ${i + 1} 项"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>`;
+      const input = li.querySelector('input'), del = li.querySelector('.del');
+      input.value = val; del.disabled = items.length <= MIN;
+      input.addEventListener('input', () => { items[i] = input.value; saveItems(); });
+      input.addEventListener('keydown', e => {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') { e.preventDefault(); if (i === items.length - 1) addItem(); else listEl.querySelectorAll('input')[i + 1].focus(); }
+        else if (e.key === 'Backspace' && input.value === '' && items.length > MIN) { e.preventDefault(); removeItem(i, Math.max(0, i - 1)); }
+      });
+      del.addEventListener('click', () => removeItem(i));
+      listEl.appendChild(li);
+    });
+    if (focusIndex != null) { const el = listEl.querySelectorAll('input')[focusIndex]; if (el) el.focus(); }
+    $('addBtn').disabled = items.length >= MAX;
+    $('limit').textContent = items.length >= MAX ? `最多 ${MAX} 项` : '';
+    renderHint();
+  }
+  function addItem() { if (items.length >= MAX) return; items.push(''); saveItems(); renderList(items.length - 1); }
+  function removeItem(i, f) { if (items.length <= MIN) return; items.splice(i, 1); saveItems(); renderList(f); }
+  $('addBtn').addEventListener('click', addItem);
+  $('clearBtn').addEventListener('click', () => { items = ['', '']; saveItems(); renderList(0); });
+  PRESETS.forEach(p => {
+    const b = document.createElement('button'); b.className = 'chip'; b.textContent = p.name;
+    b.onclick = () => { items = p.items.slice(); saveItems(); renderList(); };
+    $('presets').appendChild(b);
+  });
+
+  function soloDraw() {
+    if (drawing) return;
+    document.activeElement && document.activeElement.blur();
+    clearFry(true); beginDraw();
+    const win = randInt(items.length);
+    playDrop(makePlan(Math.random), () => setTimeout(() => {
+      openResult({
+        no: `No. <b>${pad(win + 1)}</b>`, of: `共 ${pad(items.length)} 项`, text: labelOf(win),
+        actions: [
+          { cls: 'ghost', label: '再抽一次', onClick: () => closeResult(() => { endDraw(); clearFry(); setTimeout(soloDraw, 320); }) },
+          { cls: 'solid', label: '就它了', onClick: () => closeResult(() => { endDraw(); clearFry(); }) },
+        ],
+      });
+    }, 520));
+  }
+
+  /* ================= chrome ================= */
+  const drawBtn = $('drawBtn');
+  function refreshButton() { drawBtn.disabled = drawing; drawBtn.textContent = '晃一晃，掉出一根'; }
+  drawBtn.addEventListener('click', soloDraw);
+  function renderHint() {
+    $('hint').textContent = `${items.length} 个选项 · 晃一晃，掉出来的那根就是答案`;
+    $('meta').textContent = `${pad(items.length)} 项`;
+  }
+
+  fit(); renderList(); refreshButton();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit);
+})();
+</script>
+</body>
+</html>
